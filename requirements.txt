@@ -3,6 +3,7 @@ astunparse==1.6.3
 certifi==2026.2.25
 cffi==2.0.0
 charset-normalizer==3.4.4
+Flask==3.1.2
 flatbuffers==20181003210633
 gast==0.7.0
 google-pasta==0.2.0

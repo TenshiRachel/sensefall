@@ -41,3 +41,38 @@ Line 56: imp.find_module('numpy') -> importlib.util.find_spec('numpy')
 ```
 python3 main.py
 ```
+
+### One-page dashboard + email alerts
+
+You can run a simple live dashboard with fall events and optional email alerts:
+
+```
+python3 dashboard.py
+```
+
+Then open:
+
+```
+http://<raspberry-pi-ip>:5000
+```
+
+Dashboard includes:
+- Live camera preview
+- Real-time system status and event logs
+- `Send Test Email` button to verify SMTP setup
+
+#### Email alert environment variables
+
+Set these before starting `dashboard.py`:
+
+```
+export ALERT_SMTP_HOST="smtp.gmail.com"
+export ALERT_SMTP_PORT="587"
+export ALERT_SMTP_USER="your_email@gmail.com"
+export ALERT_SMTP_PASS="your_app_password"
+export ALERT_FROM_EMAIL="your_email@gmail.com"
+export ALERT_TO_EMAIL="caretaker_email@example.com"
+export EMAIL_COOLDOWN_SEC="60"
+```
+
+If email variables are not configured, detection still runs and dashboard logging still works.
