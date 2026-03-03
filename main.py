@@ -56,7 +56,8 @@ try:
         time.sleep(0.2)
 
 except KeyboardInterrupt:
-    # Stop mic recording
-    print("Stopping mic...")
-# mic.stop()
+    # Stop System
+    print("STOPPING...")
+    camera.release()
+    # mic.stop()
 

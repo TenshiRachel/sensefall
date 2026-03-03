@@ -16,6 +16,10 @@ class PoseEstimator:
         self.smoothed_center_y = None
         self.prev_time = time.time()
 
+        # Cooldown to avoid spamming fall event
+        self.last_fall_time = 0
+        self.FALL_COOLDOWN = 2
+
     # All 17 MoveNet keypoints for expanded obstruction handling
     KEYPOINT_INDICES = {
         "nose": 0,
@@ -50,10 +54,15 @@ class PoseEstimator:
     ]
 
     def estimate_pose(self, frame):
+        """
+        Run the MoveNet pose estimation on a frame
+        """
         img = cv2.resize(frame, (192, 192))
         img = np.expand_dims(img.astype(np.uint8), axis=0)
+
         self.interpreter.set_tensor(self.input_details[0]['index'], img)
         self.interpreter.invoke()
+
         keypoints = self.interpreter.get_tensor(self.output_details[0]['index'])
         return keypoints
 
@@ -161,9 +170,12 @@ class PoseEstimator:
         self.prev_center = (center_x, self.smoothed_center_y)
         self.prev_time = current_time
 
+        current_time = time.time()
         # --- Fall decision ---
         if body_ratio > FALL_RATIO_THRESHOLD and velocity > FALL_VELOCITY_THRESHOLD:
-            print(f"[POSE] POSSIBLE FALL DETECTED (Keypoints used: {group_used})")
-            return True
+            if current_time - self.last_fall_time > self.FALL_COOLDOWN:
+                self.last_fall_time = current_time
+                print(f"[POSE] POSSIBLE FALL DETECTED (Keypoints used: {group_used})")
+                return True
 
         return False
