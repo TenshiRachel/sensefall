@@ -1,55 +1,149 @@
 import smbus
 import time
+import sys
+from collections import deque
 
+from pythonlibrary.A121_Distance_Detector import *
 
-class MMWave:
-    def __init__(self, bus=1, address=0x52):
-        self.bus = smbus.SMBus(bus)
-        self.address = address
-        self.prev_distance = None
+HUMAN_DISTANCE_MIN_MM = 400    # minimum distance to detect human
+HUMAN_DISTANCE_MAX_MM = 3000   # maximum distance to detect human
+HUMAN_STRENGTH_THRESHOLD = 500  # minimum signal strength for human
 
-    def read_raw(self):
-        data = self.bus.read_i2c_block_data(self.address, 0x00, 16)
-        return data
+FALL_VELOCITY_THRESHOLD = 1000  # mm/s
+HUMAN_MOVEMENT_TOLERANCE = 50  # mm, ignore small noise
 
-    def parse(self, raw):
-        distance = None
-        velocity = None
-        presence = 0
+class HumanDetector(A121_Distance_Detector):
+    def __init__(self, bus=1, addr=0x52, busy_pin=4):
+        super().__init__(bus, addr, busy_pin)
 
-        try:
-            parts = raw.split()
-            for p in parts:
-                if "distance" in p:
-                    distance = float(p.split(":")[1])
-                if "velocity" in p:
-                    velocity = float(p.split(":")[1])
-                if "presence" in p:
-                    presence = int(p.split(":")[1])
-        except:
-            pass
+    def detect_humans(self):
+        """Return list of human detections with distance and strength"""
+        self.set_command(SensorCommand.MEASURE_DISTANCE)
 
-        return distance, velocity, presence
+        while True:
+            status = self.get_detector_status()
+            if (status & ALL_ERROR) == 0:
+                break
+            time.sleep(0.01)
 
-    def detect_human(self):
-        raw = self.read_raw()
-        if not raw:
-            return False, 0, 0
+        result = self.get_distance_result()
+        num_peaks = result & SensorDistanceResult.NUM_DISTANCES
+        humans = []
 
-        distance, velocity, presence = self.parse(raw)
+        if (result & SensorDistanceResult.MEASURE_DISTANCE_ERROR) == 0 and num_peaks > 0:
+            for i in range(num_peaks):
+                distance = self.read_u32(REG_PEAK0_DISTANCE + i)
+                strength_u32 = self.read_u32(REG_PEAK0_STRENGTH + i)
+                # Convert 32-bit signed
+                strength = strength_u32 - 0x100000000 if strength_u32 & 0x80000000 else strength_u32
 
-        return presence == 1, distance, velocity
+                # Check if peak meets human criteria
+                if HUMAN_DISTANCE_MIN_MM <= distance <= HUMAN_DISTANCE_MAX_MM and strength > HUMAN_STRENGTH_THRESHOLD:
+                    humans.append({"distance_mm": distance, "strength": strength / 1000.0})
 
-    def detect_fall_pattern(self, distance, velocity):
-        if self.prev_distance is None:
-            self.prev_distance = distance
-            return False
+        return humans
+        
+class HumanTracker(HumanDetector):
+    def __init__(self, bus=1, addr=0x52, busy_pin=4):
+        super().__init__(bus, addr, busy_pin)
+        self.previous_humans = []
 
-        height_drop = self.prev_distance - distance
-        self.prev_distance = distance
+    def track_humans(self):
+        humans = self.detect_humans()
+        tracked = []
 
-        if velocity and height_drop:
-            if velocity > 2.0 and height_drop > 0.5:
-                return True
+        for h in humans:
+            # Find closest previous human
+            closest_prev = None
+            min_dist = 10000  # some large value
+            for p in self.previous_humans:
+                d_diff = abs(p["distance_mm"] - h["distance_mm"])
+                if d_diff < min_dist:
+                    min_dist = d_diff
+                    closest_prev = p
 
-        return False
+            # If found close match, consider it the same human
+            if closest_prev and min_dist < 200:  # 20 cm tolerance
+                tracked.append({"distance_mm": h["distance_mm"], "strength": h["strength"], "id": id(closest_prev)})
+            else:
+                # New human
+                tracked.append({"distance_mm": h["distance_mm"], "strength": h["strength"], "id": id(h)})
+
+        self.previous_humans = tracked
+        return tracked        
+        
+class HumanTrackerWithVelocity(HumanTracker):
+    def __init__(self, bus=1, addr=0x52, busy_pin=4):
+        super().__init__(bus, addr, busy_pin)
+        # Store previous distance + timestamp for velocity calculation
+        self.human_history = {}  # {human_id: {"distance_mm": x, "time": t}}
+
+    def track_humans_with_velocity(self):
+        humans = self.detect_humans()
+        tracked = []
+
+        current_time = time.time()
+
+        for h in humans:
+            # Match with previous humans
+            closest_prev = None
+            min_dist = 10000
+            for prev in self.previous_humans:
+                d_diff = abs(prev["distance_mm"] - h["distance_mm"])
+                if d_diff < min_dist:
+                    min_dist = d_diff
+                    closest_prev = prev
+
+            if closest_prev and min_dist < 200:
+                human_id = closest_prev["id"]
+            else:
+                human_id = id(h)  # New human
+
+            # Velocity estimation
+            velocity = 0
+            if human_id in self.human_history:
+                prev_record = self.human_history[human_id]
+                dt = current_time - prev_record["time"]
+                if dt > 0:
+                    velocity = (h["distance_mm"] - prev_record["distance_mm"]) / dt  # mm/s
+
+            # Save current human record
+            self.human_history[human_id] = {"distance_mm": h["distance_mm"], "time": current_time}
+
+            tracked.append({
+                "id": human_id,
+                "distance_mm": h["distance_mm"],
+                "strength": h["strength"],
+                "velocity_mm_s": velocity
+            })
+
+        self.previous_humans = tracked
+        return tracked
+
+    def detect_fall(self, tracked_humans):
+        """Detect a fall if downward velocity exceeds threshold"""
+        falls = []
+        for h in tracked_humans:
+            if h["velocity_mm_s"] < -FALL_VELOCITY_THRESHOLD:  # negative = moving closer fast
+                falls.append(h)
+        return falls
+        
+        
+if __name__ == "__main__":
+    tracker = HumanTrackerWithVelocity(bus=1, addr=0x52, busy_pin=4)
+    tracker.init()
+
+    while True:
+        tracked = tracker.track_humans_with_velocity()
+        if tracked:
+            print("Tracked Humans:")
+            for h in tracked:
+                print(f"ID: {h['id']}, Distance: {h['distance_mm']} mm, Velocity: {h['velocity_mm_s']:.2f} mm/s")
+        else:
+            print("No humans detected")
+
+        falls = tracker.detect_fall(tracked)
+        for f in falls:
+            print(f"FALL DETECTED! ID: {f['id']} Distance: {f['distance_mm']} mm Velocity: {f['velocity_mm_s']:.2f} mm/s")
+
+        time.sleep(0.1)
