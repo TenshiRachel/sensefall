@@ -7,6 +7,7 @@ from datetime import datetime
 from email.message import EmailMessage
 
 import cv2
+import requests
 from flask import Flask, jsonify, render_template_string, Response
 
 from sensors.camera import Camera
@@ -54,6 +55,46 @@ class AppState:
 
 
 state = AppState()
+
+
+def _resolve_cloud_events_url():
+    base = os.getenv("CLOUD_SYNC_URL", "").strip()
+    if not base:
+        return None
+    if base.endswith("/api/events"):
+        return base
+    return f"{base.rstrip('/')}/api/events"
+
+
+def sync_event_to_cloud(event_time, event_type, confidence=None, metadata=None):
+    url = _resolve_cloud_events_url()
+    if not url:
+        return
+
+    api_key = os.getenv("CLOUD_SYNC_API_KEY", "").strip()
+    device_id = os.getenv("CLOUD_DEVICE_ID", "home_pi_01")
+    timeout_sec = float(os.getenv("CLOUD_SYNC_TIMEOUT_SEC", "5"))
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["x-api-key"] = api_key
+
+    payload = {
+        "event_time": event_time,
+        "event_type": event_type,
+        "confidence": confidence,
+        "device_id": device_id,
+        "source": "raspberry-pi",
+        "metadata": metadata or {},
+    }
+
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=timeout_sec)
+        if resp.status_code >= 400:
+            state.add_event("WARN", f"Cloud sync failed: HTTP {resp.status_code}")
+        else:
+            state.add_event("INFO", "Cloud sync successful")
+    except Exception as exc:
+        state.add_event("WARN", f"Cloud sync error: {exc}")
 
 
 def send_fall_email_alert(event_time, is_test=False):
@@ -172,6 +213,12 @@ def detector_loop():
                     state.last_fall_ts = event_time
                     state.total_fall_events += 1
                 state.add_event("ALERT", f"Possible fall detected at {event_time}")
+                sync_event_to_cloud(
+                    event_time=event_time,
+                    event_type="fall",
+                    confidence=0.9,
+                    metadata={"sensor": "camera_pose"},
+                )
                 send_fall_email_alert(event_time)
 
             time.sleep(0.2)
