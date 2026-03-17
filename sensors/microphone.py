@@ -7,12 +7,13 @@ import threading
 import numpy as np
 import sounddevice as sd
 from scipy.signal import butter, lfilter
-from ai_edge_litert.interpreter import Interpreter
+from tflite_runtime.interpreter import Interpreter
+
 
 class Microphone:
     """
-    Microphone class using webcam microphone + YAMNet TFLite
-    Returns confidence scores for weighted fusion.
+    Microphone class using webcam microphone + YAMNet TFLite.
+    Shows debug predictions and simple fall-risk / normal-sound classification.
     """
 
     def __init__(
@@ -21,10 +22,9 @@ class Microphone:
         class_map_path="models/yamnet_class_map.csv",
         sample_rate=16000,
         chunk_duration=0.975,
-        detection_threshold=0.3,
+        detection_threshold=0.20,
         event_hold_time=2.0,
-        loudness_threshold=0.02,
-        impact_threshold=0.35,
+        min_alert_peak=0.08,
     ):
         self.sample_rate = sample_rate
         self.chunk_duration = chunk_duration
@@ -32,30 +32,17 @@ class Microphone:
 
         self.detection_threshold = detection_threshold
         self.event_hold_time = event_hold_time
-        self.loudness_threshold = loudness_threshold
-        self.impact_threshold = impact_threshold
+        self.min_alert_peak = min_alert_peak
 
-        self.audio_queue = queue.Queue()
+        self.audio_queue = queue.Queue(maxsize=5)
         self.running = False
         self.thread = None
         self.stream = None
 
-        # Detection / fusion state
-        self.latest_confidence = 0.0
-        self.held_confidence = 0.0
-        self.latest_label = "none"
+        self.emergency_detected = False
         self.last_detection_time = 0.0
-        self.last_result = {
-            "sensor": "microphone",
-            "confidence": 0.0,
-            "instant_confidence": 0.0,
-            "label": "none",
-            "detected": False,
-            "timestamp": time.time(),
-            "rms": 0.0,
-            "peak": 0.0,
-        }
-        
+
+        # Resolve model paths
         base_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.dirname(base_dir)
 
@@ -77,49 +64,64 @@ class Microphone:
         if not os.path.exists(self.class_map_path):
             raise FileNotFoundError(f"Class map not found: {self.class_map_path}")
 
-        # Load TFLite model
+        # Load interpreter
         self.interpreter = Interpreter(model_path=self.yamnet_model_path)
         self.interpreter.allocate_tensors()
 
         self.input_details = self.interpreter.get_input_details()
         self.output_details = self.interpreter.get_output_details()
 
-        # Load class names
+        # Load labels
         self.class_names = self._load_class_map(self.class_map_path)
 
-        # Emergency-related keywords
-        self.target_keywords = [
-            "shout",
-            "yell",
-            "scream",
-            "cry",
+        # Keywords for alert-like sounds
+        self.fall_keywords = [
             "bang",
             "thump",
             "thud",
             "crash",
             "slap",
-            "impact",
+            "smack",
+            "breaking",
+            "glass",
+            "explosion",
+            "fireworks",
+            "yell",
+            "shout",
+            "scream",
+            "cry",
         ]
 
-        # ---------------------------------------------------
-        # Initialize bandpass filter ONCE (optimization)
-        # This avoids recomputing filter every audio chunk
-        # ---------------------------------------------------
+        # Keywords for normal household / background sounds
+        self.normal_keywords = [
+            "speech",
+            "television",
+            "tv",
+            "clapping",
+            "hands",
+            "tap",
+            "door",
+            "music",
+            "fan",
+            "inside",
+            "room",
+            "conversation",
+            "male speech",
+            "female speech",
+        ]
+        
         self._init_bandpass_filter()
 
     def _load_class_map(self, path):
         class_names = []
         with open(path, "r", newline="", encoding="utf-8") as f:
             reader = csv.reader(f)
-            next(reader) 
+            next(reader)
             for row in reader:
                 class_names.append(row[2])
         return class_names
 
     def _init_bandpass_filter(self):
-        """
-        Precompute bandpass filter for impact-like sounds.
-        """
         lowcut = 100
         highcut = 2000
         order = 4
@@ -137,13 +139,14 @@ class Microphone:
         if status:
             print(f"[AUDIO STATUS] {status}")
 
-        audio = indata[:, 0]  # mono
-        self.audio_queue.put(audio.copy())
+        audio = indata[:, 0]
+
+        try:
+            self.audio_queue.put_nowait(audio.copy())
+        except queue.Full:
+            pass
 
     def start(self, device=None):
-        """
-        Start microphone stream and processing thread.
-        """
         if self.running:
             print("[INFO] Microphone already running.")
             return
@@ -169,11 +172,7 @@ class Microphone:
 
         print("[INFO] Microphone started.")
 
-
     def stop(self):
-        """
-        Stop microphone stream and processing thread.
-        """
         self.running = False
 
         if self.stream is not None:
@@ -185,105 +184,83 @@ class Microphone:
             finally:
                 self.stream = None
 
+        if self.thread is not None and self.thread.is_alive():
+            self.thread.join(timeout=1)
+
         print("[INFO] Microphone stopped.")
 
     def _process_audio(self):
         while self.running:
             try:
                 audio_chunk = self.audio_queue.get(timeout=1)
+                detected, status_label, rms, peak, top_predictions = self.detect_sound(audio_chunk)
 
-                instant_conf, label, rms, peak = self.detect_fall_sound(audio_chunk)
-                self.latest_confidence = instant_conf
-                self.latest_label = label
-
-                if instant_conf >= self.detection_threshold:
-                    self.held_confidence = instant_conf
+                if detected:
+                    self.emergency_detected = True
                     self.last_detection_time = time.time()
                 else:
                     if time.time() - self.last_detection_time > self.event_hold_time:
-                        self.held_confidence = 0.0
+                        self.emergency_detected = False
 
-                detected = self.held_confidence >= self.detection_threshold
+                timestamp = time.strftime("%H:%M:%S")
 
-                self.last_result = {
-                    "sensor": "microphone",
-                    "confidence": float(self.held_confidence),
-                    "instant_confidence": float(self.latest_confidence),
-                    "label": self.latest_label,
-                    "detected": detected,
-                    "timestamp": time.time(),
-                    "rms": float(rms),
-                    "peak": float(peak),
-                }
+                print(f"\n[MIC] {timestamp}")
+                print(f"RMS: {rms:.4f} | Peak: {peak:.4f} | Emergency: {self.emergency_detected}")
+                print("Top predictions:")
 
-                if instant_conf >= self.detection_threshold:
-                    print(
-                        f"[AUDIO] label={label} | instant={instant_conf:.3f} "
-                        f"| held={self.held_confidence:.3f} | RMS={rms:.3f} | Peak={peak:.3f}"
-                    )
+                for label, score in top_predictions:
+                    print(f"  - {label}: {score * 100:.2f}%")
+
+                if detected:
+                    print(f"[ALERT] FALL RISK SOUND DETECTED -> {status_label}")
+                else:
+                    if status_label.startswith("normal:"):
+                        print(f"[INFO] Likely household/background sound -> {status_label}")
+                    elif status_label == "too_quiet":
+                        print("[INFO] Too quiet / no meaningful sound")
+                    else:
+                        print("[INFO] No fall-risk sound detected")
 
             except queue.Empty:
-                if time.time() - self.last_detection_time > self.event_hold_time:
-                    self.held_confidence = 0.0
-                    self.last_result["confidence"] = 0.0
-                    self.last_result["detected"] = False
-
+                pass
             except Exception as e:
                 print(f"[ERROR] Audio processing failed: {e}")
                 
 
-    def detect_fall_sound(self, audio):
+    def detect_sound(self, audio):
         """
         Returns:
-            instant_confidence, best_label, rms, peak
+            detected, status_label, rms, peak, top_predictions
         """
-
         REQUIRED_SAMPLES = 15600
         audio = np.asarray(audio, dtype=np.float32)
 
-        # Pad or trim audio to match model input size      
+        # Pad or trim
         if len(audio) < REQUIRED_SAMPLES:
             audio = np.pad(audio, (0, REQUIRED_SAMPLES - len(audio)), mode="constant")
         elif len(audio) > REQUIRED_SAMPLES:
             audio = audio[:REQUIRED_SAMPLES]
-            
-        # ---------------------------------------------------
-        # Step 1: Band-pass filter
-        # Removes low rumble (fans, AC) and high-frequency noise
-        # Keeps frequencies where impacts usually occur
-        # ---------------------------------------------------
 
         # Band-pass filter
         audio = self.bandpass_filter(audio).astype(np.float32)
 
-        # ---------------------------------------------------
-        # Step 2: Loudness gate (ignore quiet background noise)
-        # ---------------------------------------------------
-        # Signal features
+        # Features
         rms = float(np.sqrt(np.mean(audio ** 2)))
         peak = float(np.max(np.abs(audio)))
 
-        # ---------------------------------------------------
-        # Step 3: Detect sudden impact peaks
-        # Falls usually produce a spike in amplitude
-        # ---------------------------------------------------
-        if rms < 0.005:
-            return 0.0, "too_quiet", rms, peak
+        if rms < 0.003:
+            return False, "too_quiet", rms, peak, []
 
-        # TFLite inference
-        input_index = self.input_details[0]["index"]
-        expected_shape = self.input_details[0]["shape"]
-        
-        # ---------------------------------------------------
-        # Step 4: Run YAMNet inference
-        # ---------------------------------------------------
+        # Prepare input
+        input_shape = self.input_details[0]["shape"]
 
-        if len(expected_shape) == 1:
-            input_tensor = audio
+        if len(input_shape) == 1:
+            input_tensor = audio.astype(np.float32)
         else:
-            input_tensor = np.expand_dims(audio, axis=0)
+            input_tensor = np.expand_dims(audio, axis=0).astype(np.float32)
 
-        self.interpreter.set_tensor(input_index, input_tensor)
+        # Inference
+        self.interpreter.set_tensor(self.input_details[0]["index"], input_tensor)
         self.interpreter.invoke()
 
         output_data = self.interpreter.get_tensor(self.output_details[0]["index"])
@@ -293,62 +270,50 @@ class Microphone:
         else:
             scores = output_data[0]
 
-        # Best target class among top predictions
-        best_keyword_score = 0.0
-        best_label = "none"
+        # Top 5 predictions
+        top_indices = np.argsort(scores)[::-1][:5]
+        top_predictions = []
 
-        top_indices = np.argsort(scores)[::-1][:10]
+        fall_score = 0.0
+        normal_score = 0.0
+        best_fall_label = "none"
+        best_normal_label = "none"
 
-        # ---------------------------------------------------
-        # Step 5: Check if predicted sound matches emergency types
-        # ---------------------------------------------------
         for idx in top_indices:
             score = float(scores[idx])
-            label = self.class_names[idx].lower()
+            label = self.class_names[idx]
+            label_lower = label.lower()
+            top_predictions.append((label, score))
 
-            if any(keyword in label for keyword in self.target_keywords):
-                if score > best_keyword_score:
-                    best_keyword_score = score
-                    best_label = self.class_names[idx]
+            if any(keyword in label_lower for keyword in self.fall_keywords):
+                if score > fall_score:
+                    fall_score = score
+                    best_fall_label = label
 
-        # Normalize signal features to 0..1
-        loudness_score = min(rms / self.loudness_threshold, 1.0) if self.loudness_threshold > 0 else 0.0
-        impact_score = min(peak / self.impact_threshold, 1.0) if self.impact_threshold > 0 else 0.0
+            if any(keyword in label_lower for keyword in self.normal_keywords):
+                if score > normal_score:
+                    normal_score = score
+                    best_normal_label = label
 
-        # Final confidence
-        instant_confidence = (
-            0.6 * best_keyword_score +
-            0.2 * loudness_score +
-            0.2 * impact_score
-        )
+        detected = False
+        status_label = "uncertain"
 
-        instant_confidence = float(np.clip(instant_confidence, 0.0, 1.0))
+        # Alert condition
+        if fall_score >= self.detection_threshold and peak >= self.min_alert_peak:
+            detected = True
+            status_label = f"fall_risk: {best_fall_label}"
 
-        return instant_confidence, best_label, rms, peak
+        # Normal sound condition
+        elif normal_score >= 0.10:
+            status_label = f"normal: {best_normal_label}"
 
-    def get_confidence(self):
-        return float(self.latest_confidence)
+        else:
+            status_label = "uncertain"
 
-    def get_held_confidence(self):
-        return float(self.held_confidence)
+        return detected, status_label, rms, peak, top_predictions
 
     def is_emergency_detected(self):
-        return self.held_confidence >= self.detection_threshold
-
-    def get_detection_result(self):
-        """
-        Standard output format for weighted fusion.
-        """
-        return {
-            "sensor": self.last_result["sensor"],
-            "confidence": float(self.last_result["confidence"]),
-            "instant_confidence": float(self.last_result["instant_confidence"]),
-            "label": self.last_result["label"],
-            "detected": bool(self.last_result["detected"]),
-            "timestamp": float(self.last_result["timestamp"]),
-            "rms": float(self.last_result["rms"]),
-            "peak": float(self.last_result["peak"]),
-        }
+        return self.emergency_detected
 
 
 if __name__ == "__main__":
@@ -358,14 +323,12 @@ if __name__ == "__main__":
         mic = Microphone()
 
         print("[INFO] Starting microphone test...")
-        print("[INFO] Make a loud impact-like sound or shout to test detection.")
-        print("[INFO] Press Ctrl+C to stop.\n")
+        print("[INFO] Speak, clap, shout, or make impact sounds to test.")
+        print("[INFO] Press Ctrl+C to stop.")
 
         mic.start()
 
         while True:
-            result = mic.get_detection_result()
-            print(result)
             time.sleep(0.5)
 
     except KeyboardInterrupt:
