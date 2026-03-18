@@ -3,7 +3,7 @@ import time
 import sys
 from collections import deque
 
-from pythonlibrary.A121_Distance_Detector import *
+from sensors.pythonlibrary.A121_Distance_Detector import *
 
 # ===============================
 #          parameters

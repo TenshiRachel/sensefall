@@ -289,31 +289,31 @@ class Microphone:
                 # ---------------------------------------------------
                 # Neat debug output
                 # ---------------------------------------------------
-                timestamp = time.strftime("%H:%M:%S")
-                print(f"\n[MIC] {timestamp}")
-                print(
-                    f"Conf: {self.held_confidence:.3f} | "
-                    f"Instant: {self.latest_confidence:.3f} | "
-                    f"RMS: {rms:.4f} | Peak: {peak:.4f}"
-                )
-                print(f"Status: {label}")
-                print("Top predictions:")
+                # timestamp = time.strftime("%H:%M:%S")
+                # print(f"\n[MIC] {timestamp}")
+                # print(
+                    # f"Conf: {self.held_confidence:.3f} | "
+                    # f"Instant: {self.latest_confidence:.3f} | "
+                    # f"RMS: {rms:.4f} | Peak: {peak:.4f}"
+                # )
+                # print(f"Status: {label}")
+                # print("Top predictions:")
 
-                if top_predictions:
-                    for pred_label, pred_score in top_predictions:
-                        print(f"  - {pred_label}: {pred_score * 100:.2f}%")
-                else:
-                    print("  - none")
+                # if top_predictions:
+                    # for pred_label, pred_score in top_predictions:
+                        # print(f"  - {pred_label}: {pred_score * 100:.2f}%")
+                # else:
+                    # print("  - none")
 
-                if detected:
-                    print(f"[ALERT] FALL RISK SOUND DETECTED -> {label}")
-                else:
-                    if label.startswith("normal:"):
-                        print(f"[INFO] Likely household/background sound -> {label}")
-                    elif label == "too_quiet":
-                        print("[INFO] Too quiet / no meaningful sound")
-                    else:
-                        print("[INFO] No fall-risk sound detected")
+                # if detected:
+                    # print(f"[ALERT] FALL RISK SOUND DETECTED -> {label}")
+                # else:
+                    # if label.startswith("normal:"):
+                        # print(f"[INFO] Likely household/background sound -> {label}")
+                    # elif label == "too_quiet":
+                        # print("[INFO] Too quiet / no meaningful sound")
+                    # else:
+                        # print("[INFO] No fall-risk sound detected")
 
             except queue.Empty:
                 if time.time() - self.last_detection_time > self.event_hold_time:

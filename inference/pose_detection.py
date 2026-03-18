@@ -127,7 +127,7 @@ class PoseEstimator:
         """
         CONF_THRESHOLD = 0.2
         FALL_RATIO_THRESHOLD = 0.9
-        FALL_VELOCITY_THRESHOLD = 15
+        FALL_VELOCITY_THRESHOLD = 20
         SMOOTHING = 0.7
 
         keypoints = keypoints[0][0]
@@ -137,14 +137,14 @@ class PoseEstimator:
             keypoints, CONF_THRESHOLD, frame_width, frame_height
         )
         if result is None:
-            return False
+            return 0.0
 
         center_x, center_y, group_used = result
 
         # --- Body ratio estimation ---
         body_ratio = self._estimate_body_ratio(keypoints, CONF_THRESHOLD)
         if body_ratio is None:
-            return False
+            return 0.0
 
         # --- Smooth center_y ---
         if self.smoothed_center_y is None:
@@ -164,24 +164,13 @@ class PoseEstimator:
                 velocity = (self.smoothed_center_y - self.prev_center[1]) / dt
 
         self.prev_center = (center_x, self.smoothed_center_y)
+        self.prev_time = current_time
+        
         print(f"Velocity: {velocity}, Body ratio: {body_ratio}")
         
         # --- Fall decision ---
         if body_ratio > FALL_RATIO_THRESHOLD and velocity > FALL_VELOCITY_THRESHOLD:
-			# Will always be 1
-			# TODO: Change logic for confidence score
-            ratio_score = min(body_ratio / FALL_RATIO_THRESHOLD, 1.0)
-
-            velocity_score = min(max(velocity, 0) / FALL_VELOCITY_THRESHOLD, 1.0)
-
-            RATIO_WEIGHT = 0.6
-            VELOCITY_WEIGHT = 0.4
-
-            confidence = (
-                RATIO_WEIGHT * ratio_score +
-                VELOCITY_WEIGHT * velocity_score
-            )
-            print(f"[POSE] POSSIBLE FALL DETECTED (Keypoints used: {group_used}, Confidence: {confidence:.2f})")
-            return confidence
+            print(f"[POSE] POSSIBLE FALL DETECTED (Keypoints used: {group_used})")
+            return 1.0
 
         return 0.0
