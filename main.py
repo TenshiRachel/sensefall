@@ -1,6 +1,6 @@
 import time
 from sensors.camera import Camera
-from sensors.mmWave import MMWave
+# from sensors.mmWave import MMWave
 from sensors.microphone import Microphone
 
 from inference.pose_detection import PoseEstimator
@@ -50,7 +50,7 @@ try:
         keypoints = pose_model.estimate_pose(frame)
 
         # Determine whether the detected pose indicates a fall
-        camera_fall = pose_model.detect_fall_pose(keypoints, frame_width, frame_height)
+        camera_fall_confidence = pose_model.detect_fall_pose(keypoints, frame_width, frame_height)
 
         # Small delay to reduce CPU usage and stabilize processing
         time.sleep(0.2)

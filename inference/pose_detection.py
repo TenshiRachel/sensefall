@@ -1,4 +1,4 @@
-import tensorflow as tf
+from tflite_runtime.interpreter import Interpreter
 import numpy as np
 import cv2
 import time
@@ -6,7 +6,7 @@ import time
 
 class PoseEstimator:
     def __init__(self, model_path='models/movenet_model.tflite'):
-        self.interpreter = tf.lite.Interpreter(model_path=model_path)
+        self.interpreter = Interpreter(model_path=model_path)
         self.interpreter.allocate_tensors()
 
         self.input_details = self.interpreter.get_input_details()
@@ -15,10 +15,6 @@ class PoseEstimator:
         self.prev_center = None
         self.smoothed_center_y = None
         self.prev_time = time.time()
-
-        # Cooldown to avoid spamming fall event
-        self.last_fall_time = 0
-        self.FALL_COOLDOWN = 2
 
     # All 17 MoveNet keypoints for expanded obstruction handling
     KEYPOINT_INDICES = {
@@ -131,7 +127,7 @@ class PoseEstimator:
         """
         CONF_THRESHOLD = 0.2
         FALL_RATIO_THRESHOLD = 0.9
-        FALL_VELOCITY_THRESHOLD = 25
+        FALL_VELOCITY_THRESHOLD = 15
         SMOOTHING = 0.7
 
         keypoints = keypoints[0][0]
@@ -168,14 +164,24 @@ class PoseEstimator:
                 velocity = (self.smoothed_center_y - self.prev_center[1]) / dt
 
         self.prev_center = (center_x, self.smoothed_center_y)
-        self.prev_time = current_time
-
-        current_time = time.time()
+        print(f"Velocity: {velocity}, Body ratio: {body_ratio}")
+        
         # --- Fall decision ---
         if body_ratio > FALL_RATIO_THRESHOLD and velocity > FALL_VELOCITY_THRESHOLD:
-            if current_time - self.last_fall_time > self.FALL_COOLDOWN:
-                self.last_fall_time = current_time
-                print(f"[POSE] POSSIBLE FALL DETECTED (Keypoints used: {group_used})")
-                return True
+			# Will always be 1
+			# TODO: Change logic for confidence score
+            ratio_score = min(body_ratio / FALL_RATIO_THRESHOLD, 1.0)
 
-        return False
+            velocity_score = min(max(velocity, 0) / FALL_VELOCITY_THRESHOLD, 1.0)
+
+            RATIO_WEIGHT = 0.6
+            VELOCITY_WEIGHT = 0.4
+
+            confidence = (
+                RATIO_WEIGHT * ratio_score +
+                VELOCITY_WEIGHT * velocity_score
+            )
+            print(f"[POSE] POSSIBLE FALL DETECTED (Keypoints used: {group_used}, Confidence: {confidence:.2f})")
+            return confidence
+
+        return 0.0
