@@ -16,7 +16,7 @@ on various sensors and AI models to detect falls.
 1. MoveNet Lightning UINT8 TFLite
 2. YAMNet TFLite
 3. Weighted Fusion
-4. Python version <3.12
+4. Python version < 3.12
 
 #### Installation
 1. Connect the hardware to your Raspberry Pi 5
@@ -33,7 +33,7 @@ source my_env/bin/activate
 pip install -r requirements.txt
 
 # Set GPIO pin factory
-export GPIO_PIN_FACTORY=lgpio
+export GPIOZERO_PIN_FACTORY=lgpio
 ```
 6. In your virtual environment site packages folder, navigate to the flatbuffers folder
 and open compat.py

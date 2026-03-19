@@ -68,14 +68,14 @@ class Camera:
 
         # Fast path — motion detection
         if self._motion_detect(frame_small):
-            print("[CAMERA] HUMAN DETECTED (motion)")
+            # print("[CAMERA] HUMAN DETECTED (motion)")
             return True
 
         # Slow path — HOG every N frames for stationary/far people
         self.hog_frame_count += 1
         if self.hog_frame_count % self.hog_interval == 0:
             if self._hog_detect(frame_small):
-                print("[CAMERA] HUMAN DETECTED (HOG)")
+                # print("[CAMERA] HUMAN DETECTED (HOG)")
                 return True
 
         return False

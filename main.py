@@ -1,4 +1,7 @@
 import time
+from threading import Thread, Lock
+from collections import deque
+
 from sensors.camera import Camera
 from sensors.mmWave import HumanTrackerWithVelocity
 from sensors.microphone import Microphone
@@ -6,86 +9,149 @@ from sensors.microphone import Microphone
 from inference.pose_detection import PoseEstimator
 from inference.weighted_fusion import WeightedFusion
 
-radar = HumanTrackerWithVelocity(bus=1, addr=0x52, busy_pin=4)  # mmWave radar initialization
-camera = Camera()  # Initialize camera module
-mic = Microphone()  # Initialize Microphone
+# ========================
+# INIT
+# ========================
+camera = Camera()
+radar = HumanTrackerWithVelocity(bus=1, addr=0x52, busy_pin=4)
+mic = Microphone()
 
-pose_model = PoseEstimator()  # Load pose estimation model (MoveNet)
-weighted_fusion = WeightedFusion() # Load weighted fusion
+pose_model = PoseEstimator()
+fusion = WeightedFusion()
 
 FUSION_FALL_THRESHOLD = 0.7
 
-HUMAN_DISTANCE_MIN_MM = 0
-HUMAN_DISTANCE_MAX_MM = 3000
+# Sliding windows (temporal alignment)
+camera_buffer = deque(maxlen=5)
+radar_buffer = deque(maxlen=5)
+mic_buffer = deque(maxlen=5)
 
-HUMAN_STRENGTH_MIN = 0
-HUMAN_STRENGTH_MAX = 10
+lock = Lock()
 
-SENSOR_TO_FLOOR_MM = radar.calibrate_floor_distance()
+running = True
 
-radar.set_start_and_end_range(
-	HUMAN_DISTANCE_MIN_MM,
-	HUMAN_DISTANCE_MAX_MM
-)
-
-print("SYSTEM STARTED")
-
-try:
-    mic.start()
-    radar.init()
-
-    while True:
-        mic_confidence = mic.get_confidence()
-        
-        tracked = radar.track_humans_with_velocity
-        
-        # Skip iteration if no human to track
-        if len(tracked) == 0:
-            continue
-        
-        falls = radar.detect_fall(tracked)
-        
-        # Get first fall confidence
-        radar_fall_confidence = falls[0]['fall_confidence']
-
-        # Capture frame from webcam
+# ========================
+# CAMERA THREAD
+# ========================
+def camera_worker():
+    while running:
         frame = camera.get_frame()
-
-        # If frame capture failed, skip this loop iteration
         if frame is None:
             continue
 
-        # Check if a person is visible using motion detection
         person_visible = camera.detect_person(frame)
 
-        # If no person detected in camera view, skip pose estimation
         if not person_visible:
-            camera_fall_confidence = None
+            conf = None
         else:
-			# Get frame dimensions for coordinate scaling
-            frame_height, frame_width, _ = frame.shape
-
-            # Run pose estimation model on frame to detect body keypoints
+            h, w, _ = frame.shape
             keypoints = pose_model.estimate_pose(frame)
-            
-			# Determine whether the detected pose indicates a fall
-            camera_fall_confidence = pose_model.detect_fall_pose(keypoints, frame_width, frame_height)
-        
-        final_fall_score = weighted_fusion.fuse(camera_conf=camera_fall_confidence,
-        mmwave_conf=radar_fall_confidence, mic_conf=mic_confidence)
-        
-        print(f"Camera: {camera_fall_confidence}, Radar: {radar_fall_confidence}, Mic: {mic_confidence}")
-        print(f"Final fall conf score: {final_fall_score}")
-        
-        if final_fall_score > FUSION_FALL_THRESHOLD:
-            print(f"[FUSION] POSSIBLE FALL DETECTED")
+            conf = pose_model.detect_fall_pose(keypoints, w, h)
 
-        # Small delay to reduce CPU usage and stabilize processing
-        time.sleep(0.2)
+        with lock:
+            camera_buffer.append(conf)
+
+        time.sleep(0.2)  # ~5 FPS
+
+
+# ========================
+# RADAR THREAD
+# ========================
+def radar_worker():
+    radar.init()
+    radar.set_start_and_end_range(0, 3000)
+
+    while running:
+        tracked = radar.track_humans_with_velocity()
+
+        if len(tracked) == 0:
+            conf = None
+        else:
+            falls = radar.detect_fall(tracked)
+            conf = falls[0]['fall_confidence'] if len(falls) > 0 else None
+
+        with lock:
+            radar_buffer.append(conf)
+
+        # time.sleep(0.1)  # faster than camera
+
+
+# ========================
+# MICROPHONE THREAD
+# ========================
+def mic_worker():
+    mic.start()
+
+    while running:
+        conf = mic.get_confidence()
+
+        with lock:
+            mic_buffer.append(conf)
+
+        # time.sleep(0.1)
+
+
+# ========================
+# FUSION THREAD
+# ========================
+def fusion_worker():
+    while running:
+        with lock:
+            cam_vals = [v for v in camera_buffer if v is not None]
+            rad_vals = [v for v in radar_buffer if v is not None]
+            mic_vals = [v for v in mic_buffer if v is not None]
+
+        # Temporal smoothing
+        camera_conf = max(cam_vals) if cam_vals else None
+        radar_conf = max(rad_vals) if rad_vals else None
+        mic_conf = max(mic_vals) if mic_vals else None
+
+        # Early exit (save CPU)
+        if camera_conf is None and radar_conf is None and (mic_conf is None or mic_conf < 0.2):
+            time.sleep(0.1)
+            continue
+
+        final_score = fusion.fuse(
+            camera_conf=camera_conf,
+            mmwave_conf=radar_conf,
+            mic_conf=mic_conf
+        )
+
+        print(f"[Fusion] Cam:{camera_conf} Radar:{radar_conf} Mic:{mic_conf}")
+        print(f"[Fusion] Final Score: {final_score}")
+
+        if final_score > FUSION_FALL_THRESHOLD:
+            print("?? FALL DETECTED (FUSED)")
+
+        time.sleep(0.1)
+
+
+# ========================
+# START THREADS
+# ========================
+threads = [
+    Thread(target=camera_worker),
+    Thread(target=radar_worker),
+    Thread(target=mic_worker),
+    Thread(target=fusion_worker),
+]
+
+for t in threads:
+    t.start()
+
+# ========================
+# CLEAN EXIT
+# ========================
+try:
+    while True:
+        time.sleep(1)
 
 except KeyboardInterrupt:
-    # Stop System
-    print("STOPPING...")
+    print("Stopping...")
+    running = False
+
+    for t in threads:
+        t.join()
+
     camera.release()
     mic.stop()
-

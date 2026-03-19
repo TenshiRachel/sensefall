@@ -15,10 +15,9 @@ HUMAN_DISTANCE_MAX_MM = 3000
 HUMAN_STRENGTH_MIN = 0
 HUMAN_STRENGTH_MAX = 10
 
-# SENSOR_TO_FLOOR_MM = 1000 #for manual testing
 FALL_HEIGHT_THRESHOLD = 400
 
-FALL_VELOCITY_THRESHOLD = 800
+FALL_VELOCITY_THRESHOLD = 300
 HUMAN_MOVEMENT_TOLERANCE = 50
 
 FALL_CONFIDENCE_THRESHOLD = 0.7
@@ -109,43 +108,51 @@ class HumanTrackerWithVelocity(HumanTracker):
     def __init__(self, bus=1, addr=0x52, busy_pin=4):
         super().__init__(bus, addr, busy_pin)
         self.human_history = {}
+        self.sensor_to_floor_mm = 2500 # for testing
 
     def get_height_from_floor(self, distance_mm):
-        return SENSOR_TO_FLOOR_MM - distance_mm
+        return self.sensor_to_floor_mm - distance_mm
         
     def calibrate_floor_distance(self, samples=20):
         distances = []
 
         print("Calibrating floor distance... Please ensure area is empty.")
 
-        for _ in range(samples):
-            humans = self.detect_humans()
+        try:
+            for _ in range(samples):
+                humans = self.detect_humans()
 
-            if humans:
-                # Take the farthest detected object (likely floor)
-                max_dist = max(h["distance_mm"] for h in humans)
-                distances.append(max_dist)
+                if humans:
+                    # Take the farthest detected object (likely floor)
+                    max_dist = max(h["distance_mm"] for h in humans)
+                    distances.append(max_dist)
 
-            time.sleep(0.05)
+                time.sleep(0.05)
 
-        if not distances:
-            raise RuntimeError("Calibration failed: no distance readings")
+            if not distances:
+                raise RuntimeError("Calibration failed: no distance readings")
 
-        # Use median for robustness against noise
-        distances.sort()
-        floor_distance = distances[len(distances) // 2]
+            # Use median for robustness against noise
+            distances.sort()
+            floor_distance = distances[len(distances) // 2]
 
-        print(f"Calibrated floor distance: {floor_distance} mm")
+            print(f"Calibrated floor distance: {floor_distance} mm")
 
-        return floor_distance
+            self.sensor_to_floor_mm = floor_distance
+            # return floor_distance
+        # Temp for testing
+        except RuntimeError:
+            self.sensor_to_floor_mm = 2500
 
     def compute_fall_confidence(self, h):
 
         # Normalize velocity (0 ? 1)
-        velocity_score = min(max(h["velocity_mm_s"] / 2000, 0), 1)
+        velocity_score = min(max(h["velocity_mm_s"] / FALL_VELOCITY_THRESHOLD, 0), 1)
 
         # Normalize height (closer to floor = higher score)
         height_score = min(max((FALL_HEIGHT_THRESHOLD - h["height_mm"]) / FALL_HEIGHT_THRESHOLD, 0), 1)
+        # print(velocity_score)
+        # print(height_score)
 
         # Normalize strength (optional tuning)
         strength_score = min(max((h["strength"] - HUMAN_STRENGTH_MIN) / (HUMAN_STRENGTH_MAX - HUMAN_STRENGTH_MIN), 0), 1)

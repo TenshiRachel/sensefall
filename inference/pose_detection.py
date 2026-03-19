@@ -166,7 +166,7 @@ class PoseEstimator:
         self.prev_center = (center_x, self.smoothed_center_y)
         self.prev_time = current_time
         
-        print(f"Velocity: {velocity}, Body ratio: {body_ratio}")
+        # print(f"Velocity: {velocity}, Body ratio: {body_ratio}")
         
         # --- Fall decision ---
         if body_ratio > FALL_RATIO_THRESHOLD and velocity > FALL_VELOCITY_THRESHOLD:
