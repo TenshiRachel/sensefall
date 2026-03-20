@@ -20,6 +20,9 @@ pose_model = PoseEstimator()
 fusion = WeightedFusion()
 
 FUSION_FALL_THRESHOLD = 0.7
+FALL_COOLDOWN = 5 # seconds
+
+last_fall_time = 0
 
 # Sliding windows (temporal alignment)
 camera_buffer = deque(maxlen=5)
@@ -59,7 +62,6 @@ def camera_worker():
 # ========================
 def radar_worker():
     radar.init()
-    radar.set_start_and_end_range(0, 3000)
 
     while running:
         tracked = radar.track_humans_with_velocity()
@@ -73,7 +75,7 @@ def radar_worker():
         with lock:
             radar_buffer.append(conf)
 
-        # time.sleep(0.1)  # faster than camera
+        time.sleep(0.1)  # faster than camera
 
 
 # ========================
@@ -88,13 +90,15 @@ def mic_worker():
         with lock:
             mic_buffer.append(conf)
 
-        # time.sleep(0.1)
+        time.sleep(0.1)
 
 
 # ========================
 # FUSION THREAD
 # ========================
 def fusion_worker():
+    global last_fall_time
+
     while running:
         with lock:
             cam_vals = [v for v in camera_buffer if v is not None]
@@ -106,7 +110,7 @@ def fusion_worker():
         radar_conf = max(rad_vals) if rad_vals else None
         mic_conf = max(mic_vals) if mic_vals else None
 
-        # Early exit (save CPU)
+        # Early exit
         if camera_conf is None and radar_conf is None and (mic_conf is None or mic_conf < 0.2):
             time.sleep(0.1)
             continue
@@ -117,11 +121,21 @@ def fusion_worker():
             mic_conf=mic_conf
         )
 
-        print(f"[Fusion] Cam:{camera_conf} Radar:{radar_conf} Mic:{mic_conf}")
-        print(f"[Fusion] Final Score: {final_score}")
+        current_time = time.time()
+        # print(f"Camera: {camera_conf}, Mic: {mic_conf}, Mmwave:{radar_conf}")
+        # print(f"Final score: {final_score}")
 
         if final_score > FUSION_FALL_THRESHOLD:
-            print("?? FALL DETECTED (FUSED)")
+            if current_time - last_fall_time > FALL_COOLDOWN:
+                print("[FUSION] FALL DETECTED")
+                
+                # TODO: Send email here
+                # send_email(camera_conf, radar_conf, mic_conf)
+
+                last_fall_time = current_time
+            else:
+                # Optional debug
+                print("Cooldown active, skipping alert")
 
         time.sleep(0.1)
 

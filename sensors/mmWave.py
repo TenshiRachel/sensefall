@@ -109,6 +109,11 @@ class HumanTrackerWithVelocity(HumanTracker):
         super().__init__(bus, addr, busy_pin)
         self.human_history = {}
         self.sensor_to_floor_mm = 2500 # for testing
+        
+        self.set_start_and_end_range(
+            HUMAN_DISTANCE_MIN_MM,
+            HUMAN_DISTANCE_MAX_MM
+        )
 
     def get_height_from_floor(self, distance_mm):
         return self.sensor_to_floor_mm - distance_mm
@@ -241,12 +246,6 @@ if __name__ == "__main__":
 
     tracker = HumanTrackerWithVelocity(bus=1, addr=0x52, busy_pin=4)
     tracker.init()
-    SENSOR_TO_FLOOR_MM = tracker.calibrate_floor_distance()
-
-    tracker.set_start_and_end_range(
-        HUMAN_DISTANCE_MIN_MM,
-        HUMAN_DISTANCE_MAX_MM
-    )
 
     while True:
 
