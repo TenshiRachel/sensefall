@@ -9,6 +9,12 @@ from sensors.microphone import Microphone
 from inference.pose_detection import PoseEstimator
 from inference.weighted_fusion import WeightedFusion
 
+from services.alert_service import send_fall_alert
+import requests
+import os
+from datetime import datetime
+
+
 # ========================
 # INIT
 # ========================
@@ -65,7 +71,7 @@ def radar_worker():
 
     while running:
         tracked = radar.track_humans_with_velocity()
-
+        
         if len(tracked) == 0:
             conf = None
         else:
@@ -74,7 +80,7 @@ def radar_worker():
 
         with lock:
             radar_buffer.append(conf)
-
+            
         time.sleep(0.1)  # faster than camera
 
 
@@ -125,17 +131,47 @@ def fusion_worker():
         # print(f"Camera: {camera_conf}, Mic: {mic_conf}, Mmwave:{radar_conf}")
         # print(f"Final score: {final_score}")
 
-        if final_score > FUSION_FALL_THRESHOLD:
-            if current_time - last_fall_time > FALL_COOLDOWN:
-                print("[FUSION] FALL DETECTED")
-                
-                # TODO: Send email here
-                # send_email(camera_conf, radar_conf, mic_conf)
+        if current_time - last_fall_time > FALL_COOLDOWN:
+            
+            event_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                last_fall_time = current_time
-            else:
-                # Optional debug
-                print("Cooldown active, skipping alert")
+            print("[FUSION] FALL DETECTED")
+                
+            # TODO: Send email here
+            # Send email
+            send_fall_alert(
+                confidence=final_score,
+                trigger_source="fusion",
+                extra_notes=f"Camera={camera_conf}, Radar={radar_conf}, Mic={mic_conf}"
+            )
+
+            # Sync FALL event
+            sync_event_to_cloud(
+                event_time=event_time,
+                event_type="fall",
+                confidence=final_score,
+                metadata={
+                    "camera": camera_conf,
+                    "radar": radar_conf,
+                    "mic": mic_conf
+                }
+            )
+
+            # Sync EMAIL event
+            sync_event_to_cloud(
+                event_time=event_time,
+                event_type="email",
+                confidence=1.0,
+                metadata={
+                    "trigger": "fusion",
+                    "status": "sent"
+                }
+            )
+
+            last_fall_time = current_time
+        else:
+            # Optional debug
+            print("Cooldown active, skipping alert")
 
         time.sleep(0.1)
 
