@@ -35,14 +35,25 @@ pip install -r requirements.txt
 # Set GPIO pin factory
 export GPIOZERO_PIN_FACTORY=lgpio
 ```
-6. In your virtual environment site packages folder, navigate to the flatbuffers folder
+6. Create a .env file in the project root directory with the following:
+```
+nano .env
+```
+The env file should contain the following:
+```
+SMARTFALL_EMAIL_USER=smartfall.alerts@gmail.com
+SMARTFALL_EMAIL_PASS=ldjw ziqa gphu aron
+# Replace your_email@gmail.com to your email
+SMARTFALL_EMAIL_TO=your_email@gmail.com
+```
+7. In your virtual environment site packages folder, navigate to the flatbuffers folder
 and open compat.py
-7. Change the following:
+8. Change the following:
 ```
 Line 19: import imp -> import importlib.util
 Line 56: imp.find_module('numpy') -> importlib.util.find_spec('numpy')
 ```
-8. Save the file and run main.py
+9. Save the file and run main.py
 ```
 python3 main.py
 ```

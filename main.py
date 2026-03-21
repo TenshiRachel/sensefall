@@ -2,6 +2,11 @@ import time
 from threading import Thread, Lock
 from collections import deque
 
+import requests
+import os
+from dotenv import load_dotenv
+from datetime import datetime
+
 from sensors.camera import Camera
 from sensors.mmWave import HumanTrackerWithVelocity
 from sensors.microphone import Microphone
@@ -10,14 +15,15 @@ from inference.pose_detection import PoseEstimator
 from inference.weighted_fusion import WeightedFusion
 
 from services.alert_service import send_fall_alert
-import requests
-import os
-from datetime import datetime
+
+load_dotenv()
 
 
 # ========================
 # INIT
 # ========================
+PI_IP = '192.168.137.221'
+
 camera = Camera()
 radar = HumanTrackerWithVelocity(bus=1, addr=0x52, busy_pin=4)
 mic = Microphone()
@@ -130,56 +136,57 @@ def fusion_worker():
         current_time = time.time()
         # print(f"Camera: {camera_conf}, Mic: {mic_conf}, Mmwave:{radar_conf}")
         # print(f"Final score: {final_score}")
-
-        if current_time - last_fall_time > FALL_COOLDOWN:
-            
-            event_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-            print("[FUSION] FALL DETECTED")
-                
-            # TODO: Send email here
-            # Send email
-            send_fall_alert(
-                confidence=final_score,
-                trigger_source="fusion",
-                extra_notes=f"Camera={camera_conf}, Radar={radar_conf}, Mic={mic_conf}"
-            )
-
-            # Sync FALL event
-            sent_event_to_dashboard(
-                event_time=event_time,
-                event_type="fall",
-                confidence=final_score,
-                metadata={
-                    "camera": camera_conf,
-                    "radar": radar_conf,
-                    "mic": mic_conf
-                }
-            )
-
-            # Sync EMAIL event
-            sent_event_to_dashboard(
-                event_time=event_time,
-                event_type="email",
-                confidence=1.0,
-                metadata={
-                    "trigger": "fusion",
-                    "status": "sent"
-                }
-            )
-
-            last_fall_time = current_time
-        else:
-            # Optional debug
-            print("Cooldown active, skipping alert")
+        
+        if final_score > FUSION_FALL_THRESHOLD:
+	        if current_time - last_fall_time > FALL_COOLDOWN:
+	            
+	            event_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+	
+	            print("[FUSION] FALL DETECTED")
+	                
+	            # TODO: Send email here
+	            # Send email
+	            send_fall_alert(
+	                confidence=final_score,
+	                trigger_source="fusion",
+	                extra_notes=f"Camera={camera_conf}, Radar={radar_conf}, Mic={mic_conf}"
+	            )
+	
+	            # Sync FALL event
+	            sent_event_to_dashboard(
+	                event_time=event_time,
+	                event_type="fall",
+	                confidence=final_score,
+	                metadata={
+	                    "camera": camera_conf,
+	                    "radar": radar_conf,
+	                    "mic": mic_conf
+	                }
+	            )
+	
+	            # Sync EMAIL event
+	            sent_event_to_dashboard(
+	                event_time=event_time,
+	                event_type="email",
+	                confidence=None,
+	                metadata={
+	                    "trigger": "fusion",
+	                    "status": "sent"
+	                }
+	            )
+	
+	            last_fall_time = current_time
+	        else:
+	            # Optional debug
+	            print("Cooldown active, skipping alert")
 
         time.sleep(0.1)
 
 # ========================
-# SMTP ALERT THREAD
+# SMTP ALERT
 # ========================
 def sent_event_to_dashboard(event_time, event_type, confidence=None, metadata=None):
-    url = "http://<PI_IP>:5000/api/event" 
+    url = f"http://{PI_IP}:5000/api/event" 
 
     payload = {
         "event_time": event_time,

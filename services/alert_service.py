@@ -31,16 +31,16 @@ def send_fall_alert(confidence=0.0, trigger_source="unknown", extra_notes=""):
 		
 		body = f"""FALL DETECTED
 	
-Time: {timestamp}
-Confidence: {confidence:.2f}
-
-Trigger: {trigger_source}
-
-Notes: {extra_notes if extra_notes else "No additional notes."}
- 
-Please check immediately.
-
-""".strip()
+			Time: {timestamp}
+			Confidence: {confidence:.2f}
+			
+			Trigger: {trigger_source}
+			
+			Notes: {extra_notes if extra_notes else "No additional notes."}
+			 
+			Please check immediately.
+			
+			""".strip()
 
 		msg.set_content(body)
 		
