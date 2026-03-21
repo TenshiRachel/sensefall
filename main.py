@@ -22,7 +22,7 @@ load_dotenv()
 # ========================
 # INIT
 # ========================
-PI_IP = '192.168.137.221'
+PI_IP = '192.168.1.196'
 
 camera = Camera()
 radar = HumanTrackerWithVelocity(bus=1, addr=0x52, busy_pin=4)
@@ -158,6 +158,7 @@ def fusion_worker():
 	                event_type="fall",
 	                confidence=final_score,
 	                metadata={
+                        "trigger": "fusion",
 	                    "camera": camera_conf,
 	                    "radar": radar_conf,
 	                    "mic": mic_conf
@@ -172,6 +173,7 @@ def fusion_worker():
 	                metadata={
 	                    "trigger": "fusion",
 	                    "status": "sent"
+                        "radar": radar_conf
 	                }
 	            )
 	

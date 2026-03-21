@@ -36,7 +36,6 @@ def send_fall_alert(confidence=0.0, trigger_source="unknown", extra_notes=""):
 			
 			Trigger: {trigger_source}
 			
-			Notes: {extra_notes if extra_notes else "No additional notes."}
 			 
 			Please check immediately.
 			
