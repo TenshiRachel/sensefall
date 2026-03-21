@@ -35,16 +35,9 @@ pip install -r requirements.txt
 # Set GPIO pin factory
 export GPIOZERO_PIN_FACTORY=lgpio
 ```
-6. Create a .env file in the project root directory with the following:
+6. In main.py, replace the PI_IP variable with your Raspberry Pi 5's IP address
 ```
-nano .env
-```
-The env file should contain the following:
-```
-SMARTFALL_EMAIL_USER=smartfall.alerts@gmail.com
-SMARTFALL_EMAIL_PASS=ldjw ziqa gphu aron
-# Replace your_email@gmail.com to your email
-SMARTFALL_EMAIL_TO=your_email@gmail.com
+PI_IP = 'YOUR_PI_IP_ADDRESS'
 ```
 7. In your virtual environment site packages folder, navigate to the flatbuffers folder
 and open compat.py
