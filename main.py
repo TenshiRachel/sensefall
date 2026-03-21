@@ -175,6 +175,39 @@ def fusion_worker():
 
         time.sleep(0.1)
 
+# ========================
+# SMTP ALERT THREAD
+# ========================
+def sync_event_to_cloud(event_time, event_type, confidence=None, metadata=None):
+    url = os.getenv("CLOUD_SYNC_URL", "").strip()
+    if not url:
+        print("[WARN] No cloud URL configured")
+        return
+
+    api_key = os.getenv("CLOUD_SYNC_API_KEY", "").strip()
+
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["x-api-key"] = api_key
+
+    payload = {
+        "event_time": event_time,
+        "event_type": event_type,
+        "confidence": confidence,
+        "device_id": "home_pi_01",
+        "source": "raspberry-pi",
+        "metadata": metadata or {}
+    }
+
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=5)
+        if resp.status_code >= 400:
+            print(f"[WARN] Cloud sync failed: {resp.status_code}")
+        else:
+            print(f"[INFO] Cloud sync success ({event_type})")
+    except Exception as e:
+        print(f"[ERROR] Cloud sync error: {e}")
+
 
 # ========================
 # START THREADS
