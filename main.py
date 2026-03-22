@@ -21,8 +21,6 @@ load_dotenv()
 # ========================
 # INIT
 # ========================
-PI_IP = '192.168.1.196'
-
 camera = Camera()
 radar = HumanTrackerWithVelocity(bus=1, addr=0x52, busy_pin=4)
 mic = Microphone()
@@ -187,17 +185,24 @@ def fusion_worker():
 # SMTP ALERT
 # ========================
 def sent_event_to_dashboard(event_time, event_type, confidence=None, metadata=None):
-    url = f"http://{PI_IP}:5000/api/event" 
+    DASHBOARD_URL = os.getenv("CLOUD_SYNC_URL", os.getenv("DASHBOARD_URL", "http://localhost:5000"))
+    api_key = os.getenv("CLOUD_SYNC_API_KEY", "")
+    url = f"{DASHBOARD_URL.rstrip('/')}/api/event"
 
     payload = {
         "event_time": event_time,
         "event_type": event_type,
         "confidence": confidence,
+        "device_id": os.getenv("CLOUD_DEVICE_ID", "home_pi_01"),
+        "source": "edge",
         "metadata": metadata or {}
     }
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["x-api-key"] = api_key
 
     try:
-        resp = requests.post(url, json=payload, timeout=5)
+        resp = requests.post(url, json=payload,headers=headers, timeout=int(os.getenv("CLOUD_SYNC_TIMEOUT_SEC", "5")))
         print("[INFO] Sent to dashboard")
     except Exception as e:
         print(f"[ERROR] Dashboard sent failed:", e)
