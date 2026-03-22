@@ -15,7 +15,6 @@ from inference.pose_detection import PoseEstimator
 from inference.weighted_fusion import WeightedFusion
 
 from services.alert_service import send_fall_alert
-
 load_dotenv()
 
 
