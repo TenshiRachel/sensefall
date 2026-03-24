@@ -146,6 +146,14 @@ def fusion_worker():
 	            send_fall_alert(
 	                confidence=final_score,
 	                trigger_source="fusion",
+                    event_time=event_time,
+                    sensor="fusion",
+                    sensor_scores={
+                        "camera": camera_conf,
+                        "mic": mic_conf
+                        },
+                    device_id=os.getenv("CLOUD_DEVICE_ID", "home_pi_01"),
+                    location="home",
 	                extra_notes=f"Camera={camera_conf}, Radar={radar_conf}, Mic={mic_conf}"
 	            )
 	
@@ -156,9 +164,12 @@ def fusion_worker():
 	                confidence=final_score,
 	                metadata={
                         "trigger": "fusion",
-	                    "camera": camera_conf,
-	                    "radar": radar_conf,
-	                    "mic": mic_conf
+                        "sensor": "fusion",  # Added this to indicate which sensor/system
+                        "sensor_scores": {    # Wrap sensor values here
+                            "camera": camera_conf,
+                            "radar": radar_conf,
+                            "mic": mic_conf
+                        }
 	                }
 	            )
 	
@@ -169,8 +180,13 @@ def fusion_worker():
 	                confidence=None,
 	                metadata={
 	                    "trigger": "fusion",
-	                    "status": "sent"
-                        "radar": radar_conf
+                        "sensor": "fusion",
+	                    "status": "sent",
+                        "sensor_scores": {
+                            "camera": camera_conf,
+                            "radar": radar_conf,
+                            "mic": mic_conf
+                        }
 	                }
 	            )
 	
