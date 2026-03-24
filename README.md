@@ -35,18 +35,14 @@ pip install -r requirements.txt
 # Set GPIO pin factory
 export GPIOZERO_PIN_FACTORY=lgpio
 ```
-6. In main.py, replace the PI_IP variable with your Raspberry Pi 5's IP address
-```
-PI_IP = 'YOUR_PI_IP_ADDRESS'
-```
-7. In your virtual environment site packages folder, navigate to the flatbuffers folder
+6. In your virtual environment site packages folder, navigate to the flatbuffers folder
 and open compat.py
-8. Change the following:
+7. Change the following:
 ```
 Line 19: import imp -> import importlib.util
 Line 56: imp.find_module('numpy') -> importlib.util.find_spec('numpy')
 ```
-9. Save the file and run main.py
+8. Save the file and run main.py
 ```
 python3 main.py
 ```

@@ -141,7 +141,6 @@ def fusion_worker():
 	
 	            print("[FUSION] FALL DETECTED")
 	                
-	            # TODO: Send email here
 	            # Send email
 	            send_fall_alert(
 	                confidence=final_score,

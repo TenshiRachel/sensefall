@@ -120,57 +120,76 @@ class PoseEstimator:
 
     def detect_fall_pose(self, keypoints, frame_width, frame_height):
         """
-        Detect fall using:
-        1. Body orientation ratio (lying vs standing)
-        2. Downward velocity of body center
-        Works with partial keypoint visibility - minimum 2 keypoints needed.
+        Uses body ratio and velocity to predict a fall.
+        Returns confidence score (0.0 - 1.0) if fall conditions met, else None.
+        Score is based on how far above threshold both ratio and velocity are.
+        Returns None if keypoints insufficient or below threshold.
         """
         CONF_THRESHOLD = 0.2
-        FALL_RATIO_THRESHOLD = 0.9
+        FALL_RATIO_THRESHOLD = 0.7
+        FALL_RATIO_MAX = 1.4        # ratio at which score saturates to 1.0
         FALL_VELOCITY_THRESHOLD = 20
+        FALL_VELOCITY_MAX = 60      # velocity at which score saturates to 1.0
         SMOOTHING = 0.7
 
-        keypoints = keypoints[0][0]
+        try:
+            keypoints = keypoints[0][0]
 
-        # --- Body center estimation ---
-        result = self._estimate_body_center(
-            keypoints, CONF_THRESHOLD, frame_width, frame_height
-        )
-        if result is None:
-            return 0.0
+            # --- Body center estimation ---
+            result = self._estimate_body_center(
+                keypoints, CONF_THRESHOLD, frame_width, frame_height
+            )
+            if result is None:
+                return None
 
-        center_x, center_y, group_used = result
+            center_x, center_y, group_used = result
 
-        # --- Body ratio estimation ---
-        body_ratio = self._estimate_body_ratio(keypoints, CONF_THRESHOLD)
-        if body_ratio is None:
-            return 0.0
+            # --- Body ratio estimation ---
+            body_ratio = self._estimate_body_ratio(keypoints, CONF_THRESHOLD)
+            if body_ratio is None:
+                return None
 
-        # --- Smooth center_y ---
-        if self.smoothed_center_y is None:
-            self.smoothed_center_y = center_y
-        else:
-            self.smoothed_center_y = (
-                SMOOTHING * self.smoothed_center_y +
-                (1 - SMOOTHING) * center_y
+            # --- Smooth center_y ---
+            if self.smoothed_center_y is None:
+                self.smoothed_center_y = center_y
+            else:
+                self.smoothed_center_y = (
+                    SMOOTHING * self.smoothed_center_y +
+                    (1 - SMOOTHING) * center_y
+                )
+
+            # --- Velocity ---
+            velocity = 0.0
+            current_time = time.time()
+            if self.prev_center is not None and self.prev_time is not None:
+                dt = current_time - self.prev_time
+                if dt > 0:
+                    velocity = (self.smoothed_center_y - self.prev_center[1]) / dt
+
+            self.prev_center = (center_x, self.smoothed_center_y)
+            self.prev_time = current_time
+
+            # --- Below threshold return None ---
+            if body_ratio <= FALL_RATIO_THRESHOLD or velocity <= FALL_VELOCITY_THRESHOLD:
+                return None
+
+            # --- Confidence score ---
+            # How far above threshold each metric is, clamped to 0.0 - 1.0
+            ratio_score = min(
+                (body_ratio - FALL_RATIO_THRESHOLD) / (FALL_RATIO_MAX - FALL_RATIO_THRESHOLD),
+                1.0
+            )
+            velocity_score = min(
+                (velocity - FALL_VELOCITY_THRESHOLD) / (FALL_VELOCITY_MAX - FALL_VELOCITY_THRESHOLD),
+                1.0
             )
 
-        # --- Velocity ---
-        velocity = 0
-        current_time = time.time()
-        if self.prev_center is not None and self.prev_time is not None:
-            dt = current_time - self.prev_time
-            if dt > 0:
-                velocity = (self.smoothed_center_y - self.prev_center[1]) / dt
+            # Average of both scores
+            confidence = (ratio_score + velocity_score) / 2.0
 
-        self.prev_center = (center_x, self.smoothed_center_y)
-        self.prev_time = current_time
-        
-        # print(f"Velocity: {velocity}, Body ratio: {body_ratio}")
-        
-        # --- Fall decision ---
-        if body_ratio > FALL_RATIO_THRESHOLD and velocity > FALL_VELOCITY_THRESHOLD:
-            print(f"[POSE] POSSIBLE FALL DETECTED (Keypoints used: {group_used})")
-            return 1.0
+            print(f"[POSE] FALL DETECTED confidence: {confidence:.2f}, keypoints: {group_used}")
+            return confidence
 
-        return 0.0
+        except Exception as e:
+            print(f"[POSE] Error in detect_fall_pose: {e}")
+            return None
