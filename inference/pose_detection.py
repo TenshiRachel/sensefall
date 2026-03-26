@@ -140,6 +140,7 @@ class PoseEstimator:
                 keypoints, CONF_THRESHOLD, frame_width, frame_height
             )
             if result is None:
+                # print("Cannot estimate body center")
                 return None
 
             center_x, center_y, group_used = result
@@ -147,6 +148,7 @@ class PoseEstimator:
             # --- Body ratio estimation ---
             body_ratio = self._estimate_body_ratio(keypoints, CONF_THRESHOLD)
             if body_ratio is None:
+                # print("Cannot estimate body ratio")
                 return None
 
             # --- Smooth center_y ---
@@ -171,6 +173,7 @@ class PoseEstimator:
 
             # --- Below threshold return None ---
             if body_ratio <= FALL_RATIO_THRESHOLD or velocity <= FALL_VELOCITY_THRESHOLD:
+                # print("Cam below threshold")
                 return None
 
             # --- Confidence score ---
