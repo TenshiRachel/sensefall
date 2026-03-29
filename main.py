@@ -1,4 +1,6 @@
 import time
+import json
+import cv2
 from threading import Thread, Lock
 from collections import deque
 
@@ -15,6 +17,7 @@ from inference.pose_detection import PoseEstimator
 from inference.weighted_fusion import WeightedFusion
 
 from services.alert_service import send_fall_alert
+
 load_dotenv()
 
 
@@ -38,6 +41,9 @@ camera_buffer = deque(maxlen=5)
 radar_buffer = deque(maxlen=5)
 mic_buffer = deque(maxlen=5)
 
+FRAME_PATH = "/tmp/latest_frame.jpg"
+STATUS_PATH = "/tmp/camera_status.json"
+
 lock = Lock()
 
 running = True
@@ -47,27 +53,32 @@ running = True
 # ========================
 def camera_worker():
     while running:
-        t_capture = time.perf_counter()
         frame = camera.get_frame()
         if frame is None:
-            # print("Frame error")
             continue
 
+        # Save latest frame to disk
+        cv2.imwrite(FRAME_PATH, frame)
+
+        # Save status
         person_visible = camera.detect_person(frame)
+        with open(STATUS_PATH, "w") as f:
+            json.dump({
+                "person_visible": person_visible,
+                "timestamp": time.time()
+            }, f)
 
         if not person_visible:
-            # print("No person detected")
             conf = None
-            t_capture = None
         else:
             h, w, _ = frame.shape
             keypoints = pose_model.estimate_pose(frame)
             conf = pose_model.detect_fall_pose(keypoints, w, h)
 
         with lock:
-            camera_buffer.append((conf, t_capture))
+            camera_buffer.append((conf, time.perf_counter()))
 
-        time.sleep(0.2)  # ~5 FPS
+        time.sleep(0.2)
 
 
 # ========================

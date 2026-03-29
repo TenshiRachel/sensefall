@@ -3,8 +3,8 @@ class WeightedFusion:
         # Base reliability weights
         self.weights = {
             "camera": 0.5,
-            "mmwave": 0.3,
-            "mic": 0.2
+            "mmwave": 0.4,
+            "mic": 0.1
         }
 
     def fuse(self, camera_conf=None, mmwave_conf=None, mic_conf=None):
