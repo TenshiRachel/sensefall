@@ -46,3 +46,49 @@ Line 56: imp.find_module('numpy') -> importlib.util.find_spec('numpy')
 ```
 python3 main.py
 ```
+## 📊 Performance Analysis (PASO)
+
+### ⏱️ Latency Breakdown
+
+| Event                      | Latency (ms) |
+|---------------------------|-------------|
+| Data Capture to Fusion    | 494.80      |
+| Fusion Process            | 0.03        |
+| Data Delivery to Email    | 0.67        |
+| Data Delivery to Dashboard| 5359.65     |
+| **Overall**               | **5855.25** |
+
+> 📌 Latency measured using `perf_counter`
+
+---
+
+### ⚙️ Top Time-Consuming Functions
+
+| Function     | Cumulative Time (s) |
+|--------------|--------------------|
+| Thread lock  | 1.649              |
+| Threading    | 1.648              |
+| Microphone   | 0.733              |
+
+> 📌 Measured using `cProfile`
+
+---
+
+### 💻 System Resource Usage
+
+| Metric        | Value |
+|---------------|-------|
+| CPU Usage     | 26%   |
+| Memory Usage  | 2.25% |
+
+> 📌 Measured using `pidstat`
+
+---
+
+### 📌 Key Observations
+
+- 🚨 Dashboard delivery is the main bottleneck (~5.3s)
+- ⚡ Fusion process is extremely fast
+- 🧵 Threading and locks contribute most to execution time
+- 🎤 Microphone processing has moderate cost
+- 💡 Overall system is efficient with low CPU & memory usage
